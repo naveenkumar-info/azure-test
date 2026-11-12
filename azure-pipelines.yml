@@ -1,0 +1,59 @@
+# Pipeline queued by the web UI. Values arrive as templateParameters via the REST API.
+# Create this pipeline in Azure DevOps (Pipelines > New > existing YAML) and
+# put its numeric id in the ADO_PIPELINE_ID app setting.
+
+trigger: none
+pr: none
+
+parameters:
+- name: country
+  displayName: Country
+  type: string
+  default: ''
+- name: state
+  displayName: State
+  type: string
+  default: ''
+- name: selectedStates
+  displayName: Other states (comma separated)
+  type: string
+  default: ''
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Run
+  jobs:
+  - job: Validate
+    steps:
+    - bash: |
+        set -euo pipefail
+        if [ -z "$COUNTRY" ] || [ -z "$STATE" ]; then
+          echo "##vso[task.logissue type=error]country and state are required"
+          exit 1
+        fi
+        echo "Country: $COUNTRY"
+        echo "State:   $STATE"
+        echo "Others:  ${SELECTED:-<none>}"
+      displayName: Validate input
+      env:
+        COUNTRY: ${{ parameters.country }}
+        STATE: ${{ parameters.state }}
+        SELECTED: ${{ parameters.selectedStates }}
+
+  - job: Work
+    dependsOn: Validate
+    steps:
+    - bash: |
+        set -euo pipefail
+        echo "Working on $STATE, $COUNTRY"
+        IFS=',' read -ra ITEMS <<< "${SELECTED:-}"
+        for item in "${ITEMS[@]}"; do
+          [ -n "$item" ] && echo "Also processing: $item"
+        done
+      displayName: Do the work
+      env:
+        COUNTRY: ${{ parameters.country }}
+        STATE: ${{ parameters.state }}
+        SELECTED: ${{ parameters.selectedStates }}

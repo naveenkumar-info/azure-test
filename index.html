@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run Pipeline</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    select { width: 100%; padding: 8px; margin-top: 6px; }
+    select[multiple] { height: 160px; }
+    button { margin-top: 24px; padding: 10px 20px; cursor: pointer; }
+    button:disabled { cursor: not-allowed; }
+    #status { margin-top: 16px; }
+    .error { color: #b00020; }
+    .hint { font-weight: 400; font-size: 0.85em; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Run Pipeline</h1>
+  <form id="form" novalidate>
+    <label for="country">Country</label>
+    <select id="country" required disabled>
+      <option value="">Loading...</option>
+    </select>
+
+    <label for="state">State</label>
+    <select id="state" required disabled>
+      <option value="">Select a country first</option>
+    </select>
+
+    <label for="others">Other states to include <span class="hint">(multi-select: Ctrl/Cmd + click)</span></label>
+    <select id="others" multiple disabled></select>
+
+    <button type="submit" id="submit" disabled>Run pipeline</button>
+  </form>
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <script>
+    // Countries Now API: country -> states. Replace with your own API if needed.
+    const OPTIONS_URL = "https://countriesnow.space/api/v0.1/countries/states";
+    const RUN_URL = "/api/run";
+
+    const countrySel = document.getElementById("country");
+    const stateSel = document.getElementById("state");
+    const othersSel = document.getElementById("others");
+    const submitBtn = document.getElementById("submit");
+    const statusEl = document.getElementById("status");
+
+    let data = []; // [{ name, states: [{ name }] }]
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.className = isError ? "error" : "";
+    }
+
+    function fill(select, items, placeholder) {
+      select.replaceChildren();
+      if (placeholder !== null) {
+        const p = document.createElement("option");
+        p.value = "";
+        p.textContent = placeholder;
+        select.appendChild(p);
+      }
+      for (const item of items) {
+        const o = document.createElement("option");
+        o.value = item; // display value == actual value
+        o.textContent = item;
+        select.appendChild(o);
+      }
+    }
+
+    function updateSubmit() {
+      submitBtn.disabled = !(countrySel.value && stateSel.value);
+    }
+
+    async function loadOptions() {
+      try {
+        const res = await fetch(OPTIONS_URL);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const json = await res.json();
+        data = (json.data || []).filter(c => Array.isArray(c.states) && c.states.length);
+        fill(countrySel, data.map(c => c.name), "Select a country");
+        countrySel.disabled = false;
+      } catch (e) {
+        setStatus("Could not load options: " + e.message, true);
+      }
+    }
+
+    countrySel.addEventListener("change", () => {
+      const c = data.find(x => x.name === countrySel.value);
+      const states = c ? c.states.map(s => s.name) : [];
+      fill(stateSel, states, c ? "Select a state" : "Select a country first");
+      fill(othersSel, states, null);
+      stateSel.disabled = !c;
+      othersSel.disabled = !c;
+      updateSubmit();
+    });
+
+    stateSel.addEventListener("change", updateSubmit);
+
+    document.getElementById("form").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      submitBtn.disabled = true;
+      setStatus("Queuing pipeline...", false);
+      const body = {
+        country: countrySel.value,
+        state: stateSel.value,
+        selectedStates: Array.from(othersSel.selectedOptions).map(o => o.value)
+      };
+      try {
+        const res = await fetch(RUN_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || "HTTP " + res.status);
+        statusEl.className = "";
+        statusEl.replaceChildren(document.createTextNode("Run queued: "));
+        const a = document.createElement("a");
+        a.href = result.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = "open run #" + result.id;
+        statusEl.appendChild(a);
+      } catch (e) {
+        setStatus("Failed: " + e.message, true);
+      } finally {
+        updateSubmit();
+      }
+    });
+
+    loadOptions();
+  </script>
+</body>
+</html>
